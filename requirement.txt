@@ -1,0 +1,2 @@
+surya-ocr
+beautifulsoup4
