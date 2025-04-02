@@ -21,9 +21,11 @@ def create_tables():
     try:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sr_speed_test_record (
-                UniqueID INTEGER PRIMARY KEY AUTOINCREMENT,
-                airport_id INTEGER,
-                airport_name TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                merchant_id INTEGER,
+                merchant_name TEXT,
                 node_id INTEGER,
                 node_name TEXT,
                 average_speed REAL,
@@ -35,7 +37,7 @@ def create_tables():
                 insert_time DATETIME DEFAULT CURRENT_TIMESTAMP,
                 update_time DATETIME,
                 host_info TEXT,
-                FOREIGN KEY (airport_id) REFERENCES sr_merchant(id),
+                FOREIGN KEY (merchant_id) REFERENCES sr_merchant(id),
                 FOREIGN KEY (node_id) REFERENCES sr_node(node_id)
             )
         ''')
@@ -43,6 +45,8 @@ def create_tables():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sr_merchant (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 name TEXT,
                 website_url TEXT,
                 article_url TEXT,
@@ -52,7 +56,9 @@ def create_tables():
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sr_node (
-                node_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 node_name TEXT,
                 type TEXT,
                 region TEXT

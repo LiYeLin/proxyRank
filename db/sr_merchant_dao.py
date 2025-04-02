@@ -22,11 +22,11 @@ def create_merchant(merchant: SRMerchant):
     finally:
         close_connection(conn)
 
-def get_merchant_by_id(merchant_id):
+def get_merchant_by_article_url(article_url):
     conn = create_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT * FROM sr_merchant WHERE id = ?", (merchant_id,))
+        cursor.execute("SELECT * FROM sr_merchant WHERE article_url = ?", (article_url,))
         row = cursor.fetchone()
         if row:
             return SRMerchant(**row)
