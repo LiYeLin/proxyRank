@@ -1,4 +1,5 @@
 .idea/
-.app_default.log
-.speed_test.db
-db/__pycache__/**
+app_default.log
+speed_test.db
+**/__pycache__/**
+.env

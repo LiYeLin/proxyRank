@@ -1,2 +1,3 @@
 surya-ocr
 beautifulsoup4
+openai

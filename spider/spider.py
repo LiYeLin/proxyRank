@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from llm.aliyun_llm import do_query_llm
 from models.articleInfo import articleInfo
 from utils.RetrySession import RetrySession
 from utils.url_util import is_valid_url
@@ -68,8 +69,7 @@ def has_article(html_content):
         return len(list_items) > 0
     return False
 
-
-def get_speed_test_info(articleUrl, debugHtml=None):
+def get_soup(articleUrl, debugHtml=None):
     if debugHtml is not None:
         html = debugHtml
     else:
@@ -80,8 +80,8 @@ def get_speed_test_info(articleUrl, debugHtml=None):
         except requests.exceptions.RequestException as e:
             print(f"Error fetching URL: {e}")
             return []
-
-    soup = BeautifulSoup(html, 'html.parser')
+    return BeautifulSoup(html, 'html.parser')
+def get_speed_test_info(soup):
     post_section = soup.find('section', {'id': 'post'})
     if post_section:
         imagesNode = post_section.find_all('img')
@@ -91,8 +91,14 @@ def get_speed_test_info(articleUrl, debugHtml=None):
             if is_valid_url(src_url):
                 images.append(src_url)
         result = [src for src in images if src]
-        logger.info("url为{}的文章中共找到图片{}张".format(articleUrl, len(result)))
+        logger.info("文章中共找到图片{}张".format( len(result)))
         return result
     else:
         return []
 
+def get_merchant_info_from_node(soup):
+    tmp = soup.find('div', class_='articleBody')
+    if not tmp:
+        logger.error("未找到 class='articleBody' 的 div 元素")
+        return 
+    do_query_llm(tmp.prettify())
