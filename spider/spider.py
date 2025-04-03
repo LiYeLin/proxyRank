@@ -97,7 +97,7 @@ def get_speed_test_info(soup):
         return []
 
 def get_merchant_info_from_node(soup):
-    tmp = soup.find('div', class_='articleBody')
+    tmp = soup.find('div', class_='contents-wrap')
     if not tmp:
         logger.error("未找到 class='articleBody' 的 div 元素")
         return 
