@@ -1,0 +1,18 @@
+beautifulsoup4
+openai
+requests
+beautifulsoup4
+urllib3
+python-dotenv # 用于从 .env 文件加载配置
+# --- 阿里云 OCR SDK ---
+aliyun-python-sdk-core
+aliyun-python-sdk-ocr
+# --- LLM SDK (以 Google Gemini 为例) ---
+google-generativeai
+# --- 其他基础库 ---
+# --- 阿里云 OCR SDK ---
+dashscope
+alibabacloud_tea_util
+alibabacloud_ocr_api20210707
+alibabacloud_tea
+alibabacloud_tea_openapi

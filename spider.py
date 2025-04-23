@@ -4,9 +4,9 @@ from time import sleep
 from urllib.parse import urljoin
 
 import requests
+from aliyun_llm import do_query_llm
 from bs4 import BeautifulSoup
 
-from llm.aliyun_llm import do_query_llm
 from models.articleInfo import articleInfo
 from utils.RetrySession import RetrySession
 from utils.url_util import is_valid_url
