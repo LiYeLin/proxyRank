@@ -229,7 +229,7 @@ if __name__ == '__main__':
     else:
         # 需要一个真实的本地图片文件用于测试
         # !! 修改为你本地的测速图片路径 !!
-        image_path_vl = '/Users/liyelin/PycharmProjects/proxyRank/downloaded_images/d0254ec646b6fa3c2a7f0ae4a75caa0492da3a55.png'  # 假设你有一个示例图片
+        image_path_vl = '/Users/liyelin/PycharmProjects/proxyRank/downloaded_images/ce1d83b377846adad4bd65d319e293fd227a1bbc.png'  # 假设你有一个示例图片
         try:
 
             print(f"\n开始使用多模态模型 ({BAILIAN_VL_MODEL_ID}) 处理图片...")
