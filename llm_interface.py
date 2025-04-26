@@ -2,12 +2,17 @@
 import json
 import logging
 import os
+from datetime import datetime
 from http import HTTPStatus  # Import HTTPStatus for checking response codes
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 # 导入 DashScope SDK
 import dashscope
 from openai import OpenAI
+
+from db.sr_merchant_speed_test_pic_dao import query_pic_record_by_md5, create_pic_record
+from models.SRMerchantSpeedTestPic import SRMerchantSpeedTestPic
+from sr_utils import validate_data
 
 logger = logging.getLogger(__name__)
 # 从 config 导入所有需要的配置
@@ -45,7 +50,7 @@ def configure_llm_vl_models():
 
     # 检查文本模型 ID
     if not BAILIAN_MODEL_ID:
-        logger.error(f"Bailian 文本模型 ID (BAILIAN_MODEL_ID) 未配置或无效: '{BAILIAN_MODEL_ID}'")
+        logger.exception(f"Bailian 文本模型 ID (BAILIAN_MODEL_ID) 未配置或无效: '{BAILIAN_MODEL_ID}'")
         IS_LLM_CONFIGURED = False
     else:
         logger.info(f"将使用 Bailian 文本模型: {BAILIAN_MODEL_ID}")
@@ -115,10 +120,10 @@ def extract_info_llm(article_text: str) -> dict | None:
 
             try:
                 extracted_data = json.loads(extracted_text)
-                logger.info("LLM 提取信息并成功解析 JSON。")
+                logger.info(f"LLM 提取信息并成功解析 JSON。{extracted_data}")
                 return extracted_data
             except json.JSONDecodeError as e:
-                logger.error(f"解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{extracted_text}'", exc_info=True)
+                logger.exception(f"解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{extracted_text}'", exc_info=True)
                 return None
 
         else:
@@ -128,38 +133,49 @@ def extract_info_llm(article_text: str) -> dict | None:
 
     except Exception as e:
         # 处理 SDK 或网络等其他异常
-        logger.error(f"调用 DashScope API 时发生未知错误: {e}", exc_info=True)
+        logger.exception(f"调用 DashScope API 时发生未知错误: {e}", exc_info=True)
         return None
 
 
-import re
-
-
-def extract_json_content(text):
-    pattern = r'```json(.*?)```'
-    match = re.search(pattern, text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    else:
-        return None
+def extract_info_from_image(img_info: dict, merchant_id: int) -> Dict[str, Any] | None:
+    """
+    检查是否有过调用（根据md5判断） 如果有 用历史的结果
+    没有 实际调用多模态 ，防止反复运行 重复调用
+    """
+    # 1. 先查询是否调用过
+    record_from_db = query_pic_record_by_md5(img_info.get("md5"))
+    if record_from_db:
+        img_info["pic_id"] = record_from_db.id
+        return json.loads(str(record_from_db.model_return).replace("'", "\""))
+    # 2. 调用 LLM
+    llm_result = extract_info_from_image_llm(img_info)
+    if not llm_result:
+        raise ValueError("LLM 未返回数据。")
+    if not validate_data(llm_result):
+        raise ValueError(f"数据不符合。{llm_result}")
+    # 3. 创建记录
+    record = create_pic_record(
+        SRMerchantSpeedTestPic(merchant_id=merchant_id, pic_md5=img_info.get("md5"), pic_path=img_info.get("path"),
+                               pic_url=img_info.get("url"), test_time=llm_result.get("test_time"),
+                               model_return=json.dumps(llm_result)))
+    img_info["pic_id"] = record.id
+    return llm_result
 
 
 # --- 新增函数：使用 VL 模型处理图片 ---
-def extract_info_from_image_llm(img_path: str) -> List[Dict[str, Any]] | None:
+def extract_info_from_image_llm(img_info: dict) -> Dict[str, Any] | None:
     """
-    使用配置好的阿里云百炼/DashScope多模态模型从图片中提取表格信息。
-    返回一个包含提取信息的字典列表，格式基于 LLM_IMAGE_EXTRACTION_PROMPT。
+    实际的去调用多模态大模型 从测速截图中获取测速记录
     """
+    start_time = datetime.now()
     if not IS_VL_MODEL_CONFIGURED:  # Check specific flag for VL model
         logger.warning("多模态 LLM 未正确配置，无法从图片提取信息。")
         return None
     if not BAILIAN_VL_MODEL_ID:
         logger.error("BAILIAN_VL_MODEL_ID 配置丢失，无法调用多模态模型。")
         return None
-
     try:
-        image_path = f"file://{img_path}"
-
+        image_path = f"file://{img_info.get("path")}"
         logger.info(f"正在调用 DashScope API (多模态模型: {BAILIAN_VL_MODEL_ID})...")
         prompt_ = [
             {
@@ -172,22 +188,33 @@ def extract_info_from_image_llm(img_path: str) -> List[Dict[str, Any]] | None:
                 ],
             }
         ]
+        # 2. 调用多模态模型
         response = dashscope.MultiModalConversation.call(
             api_key=DASHSCOPE_API_KEY,
             model=BAILIAN_VL_MODEL_ID,
             messages=prompt_,
             vl_high_resolution_images=True,
             result_format='message',
-            response_format={'type': 'json_object'}
+            response_format={'type': 'json_object'},
+            timeout=1200
         )
-
-        print("大模型的回复:\n ", response.output.choices[0].message.content[0]["text"])
-        print("Token用量情况：", "输入总Token：", response.usage["input_tokens"], "，输入图像Token：",
-              response.usage["image_tokens"])
-
+        if not response.output:
+            logger.error(
+                f"DashScope API 调用失败: Code={response.code}, Message={response.message}  耗时：{datetime.now() - start_time}")
+            return None
+        text_ = response.output.choices[0].message.content[0]["text"]
+        logger.info(
+            f"Token用量情况：输入总Token：{response.usage["input_tokens"]}，输入图像Token：{response.usage["image_tokens"]} 耗时：{datetime.now() - start_time}")
+        try:
+            extracted_data = json.loads(text_)
+            logger.info("LLM 提取信息并成功解析 JSON。")
+            return extracted_data
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{text_}'", exc_info=True)
+            return None
     except Exception as e:
         # 处理 SDK、Base64 编码或网络等其他异常
-        logger.error(f"调用 DashScope 多模态 API 时发生未知错误: {e}", exc_info=True)
+        logger.exception(f"调用 DashScope 多模态 API 时发生未知错误: {e}", exc_info=True)
         return None
 
 
@@ -196,31 +223,31 @@ if __name__ == '__main__':
     # 确保你的 API Key 和 Model ID 在 config.py 或 .env 中已正确配置
     if not IS_LLM_CONFIGURED:
         print("LLM 未配置，请检查 config.py 或 .env 文件中的 DASHSCOPE_API_KEY 和 BAILIAN_MODEL_ID。")
-    # sample_text = """
-    # 本次带来的是 ABC 服务商的最新情况。
-    # 官网地址：https://abc-service.com。
-    # 他们最近上线了新的套餐：入门版，每月仅需 15 元；专业版，年付 180 元，流量更多。
-    # 节点方面，香港 HKT、日本 IIJ 和新加坡线路表现不错。美国 GIA 稍有延迟。
-    # 总体来说值得推荐。
-    # """
-    # print(f"使用的模型: {BAILIAN_MODEL_ID}")
-    # info = extract_info_llm(sample_text)
-    # if info:
-    #     print("\nLLM 提取结果:")
-    #     print(json.dumps(info, indent=2, ensure_ascii=False))
-    # else:
-    #     print("\nLLM 提取失败。")
-    #
-    # print("\n测试一个可能不包含单一机场信息的文本：")
-    # sample_text_general = """
-    # 最近市场上出现了很多新的网络服务，选择时需要注意稳定性。香港和日本节点通常延迟较低。价格方面差异很大。
-    # """
-    # info_general = extract_info_llm(sample_text_general)
-    # if info_general:
-    #      print("\nLLM 提取结果 (通用文本):")
-    #      print(json.dumps(info_general, indent=2, ensure_ascii=False))
-    # else:
-    #      print("\nLLM 提取失败 (通用文本)。")
+    sample_text = """
+    本次带来的是 ABC 服务商的最新情况。
+    官网地址：https://abc-service.com。
+    他们最近上线了新的套餐：入门版，每月仅需 15 元；专业版，年付 180 元，流量更多。
+    节点方面，香港 HKT、日本 IIJ 和新加坡线路表现不错。美国 GIA 稍有延迟。
+    总体来说值得推荐。
+    """
+    print(f"使用的模型: {BAILIAN_MODEL_ID}")
+    info = extract_info_llm(sample_text)
+    if info:
+        print("\nLLM 提取结果:")
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+    else:
+        print("\nLLM 提取失败。")
+
+    print("\n测试一个可能不包含单一机场信息的文本：")
+    sample_text_general = """
+    最近市场上出现了很多新的网络服务，选择时需要注意稳定性。香港和日本节点通常延迟较低。价格方面差异很大。
+    """
+    info_general = extract_info_llm(sample_text_general)
+    if info_general:
+        print("\nLLM 提取结果 (通用文本):")
+        print(json.dumps(info_general, indent=2, ensure_ascii=False))
+    else:
+        print("\nLLM 提取失败 (通用文本)。")
 
     # --- 测试图片提取 ---
     print("\n--- 测试图片提取 ---")
@@ -233,11 +260,9 @@ if __name__ == '__main__':
         try:
 
             print(f"\n开始使用多模态模型 ({BAILIAN_VL_MODEL_ID}) 处理图片...")
-            image_data = extract_info_from_image_llm(image_path_vl)
+            image_data = extract_info_from_image({"md5": "", "url": image_path_vl}, 1)
 
             if image_data:
-                print("\nLLM 图片提取结果:")
-                print(json.dumps(image_data, indent=2, ensure_ascii=False))
                 print(f"\n成功提取 {len(image_data)} 条记录。")
             else:
                 print("\nLLM 图片提取失败或未提取到有效记录。")

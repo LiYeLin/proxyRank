@@ -22,7 +22,7 @@ def create_merchant(merchant: SRMerchant) -> SRMerchant | None:
         logger.info(f"成功创建商家: {merchant.name} (ID: {merchant.id})")
         return merchant
     except sqlite3.Error as e:
-        logger.error(f"创建商家信息 '{merchant.name}' 失败: {e}", exc_info=True)
+        logger.exception(f"创建商家信息 '{merchant.name}' 失败: {e}", exc_info=True)
         return None
     finally:
         close_connection(conn)
@@ -46,7 +46,7 @@ def get_merchant_by_id(merchant_id: int) -> SRMerchant | None:
             )
         return None
     except sqlite3.Error as e:
-        logger.error(f"获取商家信息 (ID: {merchant_id}) 失败: {e}", exc_info=True)
+        logger.exception(f"获取商家信息 (ID: {merchant_id}) 失败: {e}", exc_info=True)
         return None
     finally:
         close_connection(conn)
@@ -68,7 +68,7 @@ def get_merchant_by_name(name: str) -> SRMerchant | None:
             )
         return None
     except sqlite3.Error as e:
-        logger.error(f"根据名称 '{name}' 获取商家信息失败: {e}", exc_info=True)
+        logger.exception(f"根据名称 '{name}' 获取商家信息失败: {e}", exc_info=True)
         return None
     finally:
         close_connection(conn)
@@ -107,7 +107,7 @@ def update_merchant(merchant: SRMerchant) -> bool:
         logger.info(f"成功更新商家: {merchant.name} (ID: {merchant.id})")
         return True
     except sqlite3.Error as e:
-        logger.error(f"更新商家信息 '{merchant.name}' (ID: {merchant.id}) 失败: {e}", exc_info=True)
+        logger.exception(f"更新商家信息 '{merchant.name}' (ID: {merchant.id}) 失败: {e}", exc_info=True)
         return False
     finally:
         close_connection(conn)
@@ -123,7 +123,7 @@ def delete_merchant(merchant_id: int) -> bool:
         logger.info(f"成功删除商家 (ID: {merchant_id})")
         return True
     except sqlite3.Error as e:
-        logger.error(f"删除商家 (ID: {merchant_id}) 失败: {e}", exc_info=True)
+        logger.exception(f"删除商家 (ID: {merchant_id}) 失败: {e}", exc_info=True)
         return False
     finally:
         close_connection(conn)

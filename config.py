@@ -39,7 +39,7 @@ BAILIAN_VL_MODEL_ID = os.getenv("BAILIAN_VL_MODEL_ID", "qwen-vl-plus") # Use a V
 # 图片下载目录
 IMAGE_DOWNLOAD_DIR = "downloaded_images"
 # 日志文件
-LOG_FILE = 'app_scraper.log'
+LOG_FILE = 'app_default.log'
 # 请求头
 REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -63,40 +63,48 @@ JSON 结果：
 
 
 # !! Prompt for IMAGE extraction (OCR replacement) !!
-LLM_IMAGE_EXTRACTION_PROMPT = """请结构化这个图片中的信息 我只在乎:[序号, 节点名称, 类型, 平均速度, 最高速度, TLS RTT, HTTPS延迟]这几个字段。 其中：[平均速度, 最高速度, TLS RTT, HTTPS延迟]这几个字段不需要提取后面的单位（ms/MB等）只需要提取数字即可。
-将提取的结果构造成一个 JSON 列表，列表中的每个对象代表表格中的一行数据，对象的键应该是上面提到的字段名。如果某行缺少某个字段的值，请将该字段的值设为 null 或空字符串。请注意 提取每一行信息
-形如：[
-  {
-    "序号": 1,
-    "节点名称": "官网：stc.zone",
-    "类型": "ShadowsocksR",
-    "平均速度": "0",
-    "最高速度": "0",
-    "TLS RTT": "-",
-    "HTTPS延迟": "-"
-  },
-  {
-    "序号": 2,
-    "节点名称": "引导页：bit.ly/3sWoAZU",
-    "类型": "ShadowsocksR",
-    "平均速度": "0",
-    "最高速度": "0",
-    "TLS RTT": "-",
-    "HTTPS延迟": "-"
-  },
-  ...
-  {
-    "序号": 38,
-    "节点名称": "香港 05 (0.5x)",
-    "类型": "ShadowsocksR",
-    "平均速度": "46.1",
-    "最高速度": "67.3",
-    "TLS RTT": "137",
-    "HTTPS延迟": "120"
-  }
-  ]
+LLM_IMAGE_EXTRACTION_PROMPT = """
+请结构化这个图片中的信息，并且以json对象的格式输出，对象包含两个字段：test_time （测试时间，从图片中的表格的最后一行提取）/test_record_list 从图片中的表格的其他行提取
+最后一行会有形如：‘测试时间：2024-10-09 21：07：14（CST），本测试为试验性结果，仅供参考。’的字样，请提取其中时间 并且以yyyy-mm-dd hh:mm:ss的形式放在输出对象test_time字段中
+test_record_list列表中的每个对象代表表格中的一行数据，每个对象我只在乎:[序号, 节点名称, 类型, 平均速度, 最高速度, TLS RTT, HTTPS延迟]这几个字段。
+如果某行缺少某个字段的值，请将该字段的值设为 null 或空字符串。
+！！！请注意 尽可能的提取每一行信息
+你输出的内容应该形如：
+{
+  "test_time":"2024-10-09 21:07:14",
+  "test_record_list":[
+    {
+        "序号": 1,
+        "节点名称": "官网：stc.zone",
+        "类型": "ShadowsocksR",
+        "平均速度": "0",
+        "最高速度": "0",
+        "TLSRTT": "-",
+        "HTTPS延迟": "-"
+    },
+    {
+        "序号": 2,
+        "节点名称": "引导页：bit.ly/3sWoAZU",
+        "类型": "ShadowsocksR",
+        "平均速度": "0",
+        "最高速度": "0",
+        "TLSRTT": "-",
+        "HTTPS延迟": "-"
+    },
+    {
+        "序号": 3,
+        "节点名称": "香港 05 (0.5x)",
+        "类型": "ShadowsocksR",
+        "平均速度": "46.1",
+        "最高速度": "67.3",
+        "TLSRTT": "137",
+        "HTTPS延迟": "120"
+    },
+    ......
+]
+}
 """
 
 # --- OCR 相关配置 ---
 # 根据你的 OCR 模型和需求调整
-OCR_EXPECTED_COLUMNS = ["节点名称", "平均速度", "最大速度", "TLS RTT", "HTTPS 延迟", "解锁信息", "测试时间"] # 示例列名
+REQUIRED_KEYS = ["节点名称", "平均速度", "最大速度", "TLSRTT", "HTTPS延迟"] # 示例列名

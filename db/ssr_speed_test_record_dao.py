@@ -21,14 +21,14 @@ def create_record(record: SSRSpeedTestRecord) -> SSRSpeedTestRecord | None:
     sql = '''
         INSERT INTO sr_speed_test_record (
             merchant_id, merchant_name, node_id, node_name, average_speed,
-            max_speed, tls_rtt, https_delay, unlock_info, test_time,
-            host_info, update_time, gmt_modified
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            max_speed, tls_rtt, https_delay, test_time,
+            host_info, gmt_modified,pic_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
     '''
     params = (
         record.airport_id, record.airport_name, record.node_id, record.node_name, record.average_speed,
-        record.max_speed, record.tls_rtt, record.https_delay, record.unlock_info, record.test_time,
-        record.host_info, datetime.now(), datetime.now() # insert_time 由 DB DEFAULT 处理, update_time/gmt_modified 在创建时设置
+        record.max_speed, record.tls_rtt, record.https_delay,  record.test_time,
+        record.host_info, datetime.now(),record.pic_id
     )
     try:
         cursor.execute(sql, params)
@@ -43,7 +43,7 @@ def create_record(record: SSRSpeedTestRecord) -> SSRSpeedTestRecord | None:
         # record.id = record_id
         return record # 或者根据 ID 重新查询一次以获取完整信息包括 gmt_create
     except sqlite3.Error as e:
-        logger.error(f"创建测速记录 for {record.airport_name} - {record.node_name} 失败: {e}", exc_info=True)
+        logger.exception(f"创建测速记录 for {record.airport_name} - {record.node_name} 失败: {e}", exc_info=True)
         return None
     finally:
         close_connection(conn)
@@ -58,25 +58,15 @@ def get_records_by_merchant(merchant_id: int) -> List[SSRSpeedTestRecord]:
         rows = cursor.fetchall()
         for row in rows:
             # 将数据库列映射回模型字段
-            records.append(SSRSpeedTestRecord(
-                UniqueID=row['id'], # 映射 id 到 UniqueID
-                airport_id=row['merchant_id'],
-                airport_name=row['merchant_name'],
-                node_id=row['node_id'],
-                node_name=row['node_name'],
-                average_speed=row['average_speed'],
-                max_speed=row['max_speed'],
-                tls_rtt=row['tls_rtt'],
-                https_delay=row['https_delay'],
-                unlock_info=row['unlock_info'],
-                test_time=row['test_time'], # 需要确保存储和读取时格式一致或进行转换
-                insert_time=row['gmt_create'], # 映射 gmt_create
-                update_time=row['gmt_modified'], # 映射 gmt_modified
-                host_info=row['host_info']
-            ))
+            records.append(
+                SSRSpeedTestRecord(UniqueID=row['id'], airport_id=row['merchant_id'], airport_name=row['merchant_name'],
+                                   node_id=row['node_id'], node_name=row['node_name'],
+                                   average_speed=row['average_speed'], max_speed=row['max_speed'],
+                                   tls_rtt=row['tls_rtt'], https_delay=row['https_delay'], test_time=row['test_time'],
+                                   host_info=row['host_info']))
         return records
     except sqlite3.Error as e:
-        logger.error(f"获取商家 (ID: {merchant_id}) 的测速记录失败: {e}", exc_info=True)
+        logger.exception(f"获取商家 (ID: {merchant_id}) 的测速记录失败: {e}", exc_info=True)
         return []
     finally:
         close_connection(conn)

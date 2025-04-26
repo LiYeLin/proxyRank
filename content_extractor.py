@@ -98,9 +98,6 @@ def extract_content_bs(html_content: str, article_url: str) -> articleInfo | Non
         if not content_div:
             logger.error(f"无法在 URL {article_url} 中找到主要内容容器。检查选择器或页面结构。")
             return None
-        else:
-             logger.info(f"成功找到主要内容容器，标签: <{content_div.name} class='{' '.join(content_div.get('class', []))}' id='{content_div.get('id', '')}'>")
-
 
         # --- 提取纯文本内容 ---
         # get_text() 会提取所有子标签的文本
@@ -140,5 +137,5 @@ def extract_content_bs(html_content: str, article_url: str) -> articleInfo | Non
         )
 
     except Exception as e:
-        logger.error(f"使用 BeautifulSoup 解析 URL {article_url} 时出错: {e}", exc_info=True)
+        logger.exception(f"使用 BeautifulSoup 解析 URL {article_url} 时出错: {e}", exc_info=True)
         return None

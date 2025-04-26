@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict
 
+from db.db_connection import create_connection
 from models.SSRSpeedTestRecord import SSRSpeedTestRecord
 
 logger = logging.getLogger(__name__)
@@ -81,61 +82,25 @@ def calculate_all_scores() -> Dict[str, Dict[str, float]]:
 
     # 1. 从数据库获取所有最近的记录 (例如最近 30 天)
     # !! 注意：这里需要一个 DAO 函数来获取所有记录或按时间范围获取
-    # conn = create_connection()
-    # cursor = conn.cursor()
-    # thirty_days_ago = datetime.now() - timedelta(days=30)
-    # cursor.execute("SELECT * FROM sr_speed_test_record WHERE test_time >= ?", (thirty_days_ago,))
+    conn = create_connection()
+    cursor = conn.cursor()
+    # cursor.execute("SELECT * FROM sr_speed_test_record", )
     # rows = cursor.fetchall()
     # close_connection(conn)
-
+    #
     # 假设我们有一个函数能获取所有商家的记录
     # all_merchants = sr_merchant_dao.get_all_merchants() # 需要实现这个 DAO 函数
     # for merchant in all_merchants:
     #     records = ssr_speed_test_record_dao.get_records_by_merchant(merchant.id)
-
+    #
     # !! 简化处理：假设我们能获取所有记录，然后在内存中分组。对于大数据量效率不高 !!
     # all_records = ssr_speed_test_record_dao.get_all_records() # 需要实现这个 DAO 函数
     # 假设 all_records 是 SSRSpeedTestRecord 对象的列表
-
+    #
     # --- 模拟获取记录并分组 ---
     # 这里的实现需要根据你的 DAO 进行调整
     # 假设 `get_all_records_grouped` 返回 {merchant_id: {node_id: [record_obj, ...]}}
     # grouped_records = ssr_speed_test_record_dao.get_all_records_grouped(days=30)
-
-    # --- 临时模拟分组逻辑 (需要替换为 DAO 查询) ---
-    print("警告：正在使用模拟数据获取和分组逻辑进行评分，请用真实的 DAO 查询替换！")
-    temp_conn = sqlite3.connect('speed_test.db')
-    temp_conn.row_factory = sqlite3.Row
-    temp_cursor = temp_conn.cursor()
-    try:
-        temp_cursor.execute("SELECT * FROM sr_speed_test_record WHERE test_time >= date('now', '-30 days')")
-        rows = temp_cursor.fetchall()
-        all_records_in_30d = []
-        for row in rows:
-             all_records_in_30d.append(SSRSpeedTestRecord(
-                UniqueID=row['id'], airport_id=row['merchant_id'], airport_name=row['merchant_name'],
-                node_id=row['node_id'], node_name=row['node_name'], average_speed=row['average_speed'],
-                max_speed=row['max_speed'], tls_rtt=row['tls_rtt'], https_delay=row['https_delay'],
-                unlock_info=row['unlock_info'], test_time=datetime.fromisoformat(row['test_time']) if row['test_time'] else None,
-                insert_time=datetime.fromisoformat(row['gmt_create']) if row['gmt_create'] else None,
-                update_time=datetime.fromisoformat(row['gmt_modified']) if row['gmt_modified'] else None,
-                host_info=row['host_info']
-            ))
-
-        for record in all_records_in_30d:
-            if record.airport_id not in node_records:
-                node_records[record.airport_id] = {}
-            if record.node_id not in node_records[record.airport_id]:
-                node_records[record.airport_id][record.node_id] = []
-            node_records[record.airport_id][record.node_id].append(record)
-
-    except Exception as e:
-         logger.error(f"临时获取评分数据时出错: {e}", exc_info=True)
-    finally:
-         if temp_conn:
-             temp_conn.close()
-    # --- 模拟结束 ---
-
 
     # 2. 为每个节点计算得分
     merchant_avg_scores = {} # {merchant_id: [node_scores]}

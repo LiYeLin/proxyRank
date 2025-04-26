@@ -3,3 +3,4 @@ app_default.log
 speed_test.db
 **/__pycache__/**
 .env
+/downloaded_images/

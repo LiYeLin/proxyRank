@@ -1,26 +1,22 @@
-import json
 # main.py
 import logging
-import time
 from datetime import datetime
 from typing import List
 from urllib.parse import urljoin, urlparse
 
 import requests  # 导入 requests 以便捕获其异常
 from bs4 import BeautifulSoup  # 需要导入以获取列表页信息
-from ocr_interface import process_image_ocr
 
 from config import (
     TARGET_BLOG_BASE_URL, ARTICLE_LIST_URL, REQUEST_HEADERS, LOG_FILE  # 如果需要保存图片，则需要此配置
 )
 from content_extractor import extract_content_bs
+from converter import ocr_convert_to_record
 from db import sr_merchant_dao, sr_node_dao, ssr_speed_test_record_dao
-from db.db_connection import close_connection, create_connection
 from db.db_connection import create_tables
 from image_downloader import download_image, save_image  # 仅下载 bytes
-from llm_interface import extract_info_llm
-from models.SRNode import SRNode
-from models.SSRSpeedTestRecord import SSRSpeedTestRecord
+from llm_interface import extract_info_llm, extract_info_from_image
+from models import articleInfo
 from scoring import calculate_all_scores
 from utils.RetrySession import RetrySession
 from utils.logger_config import setup_logging
@@ -90,16 +86,71 @@ def get_article_urls_from_one_page(page_url: str) -> List[str]:
         return unique_urls
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"获取文章列表页面 {page_url} 失败: {e}", exc_info=True)
+        logger.exception(f"获取文章列表页面 {page_url} 失败: {e}", exc_info=True)
         return []
     except Exception as e:
-        logger.error(f"解析文章列表页面 {page_url} 时出错: {e}", exc_info=True)
+        logger.exception(f"解析文章列表页面 {page_url} 时出错: {e}", exc_info=True)
         return []
+
+
+def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_name: str, article_info: articleInfo):
+    """
+    处理图片并保存节点和测速记录。
+    """
+    ocr_processed_count = 0
+    # 1. 下载图片
+    image_bytes = download_image(image_url, retry_session)
+    if not image_bytes:
+        raise ValueError("无法下载图片。")
+    pic_info = save_image(image_bytes=image_bytes, merchant_name=merchant_name, original_url=image_url)
+    img_url = pic_info.get("url")
+    # 2. 从图片中提取表格数据
+    try:
+        speed_test_record_result = extract_info_from_image(pic_info, merchant_id)
+    except ValueError as e:
+        logger.error(f"[{merchant_name}]从图片 {img_url} 解析出 OCR 表格数据时出错: 数据问题{e}")
+        raise e
+    except Exception as e:
+        logger.exception(f"[{merchant_name}]从图片 {img_url} 解析出 OCR 表格数据时出错:未知问题 {e}")
+        raise e
+    if not speed_test_record_result:
+        logger.warning(f"[{merchant_name}]未能从图片 {img_url} 解析出 OCR 表格数据。")
+        raise ValueError("未能从图片提取表格数据。")
+    speed_test_record_list = speed_test_record_result.get("test_record_list", [])
+    test_time = speed_test_record_result.get("test_time") or article_info.articleDateTime
+
+    # 3. 解析 OCR 结果并存入数据库
+    for ocr_record in speed_test_record_list:
+        try:
+            # 3.1 数据处理
+            convert_dict = ocr_convert_to_record(ocr_record, merchant_id, test_time, merchant_name,pic_info)
+            sr_node = convert_dict[0]
+            # 转换成SSRSpeedTestRecord类型
+            sr_record = convert_dict[1]
+
+            # 3.2-- 获取或创建节点记录 --
+            node = sr_node_dao.find_or_create_node(sr_node)  # 需要在 sr_node_dao 添加此函数
+            if not node or not node.node_id:
+                logger.error(
+                    f"[{merchant_name}]无法为节点 '{sr_node}' (来自机场 '{merchant_name}') 创建或找到数据库记录。")
+                continue
+            sr_record.node_id = node.node_id
+            # 3.3-- 插入测速记录
+            ssr_speed_test_record_dao.create_record(sr_record)
+        except Exception as e:
+            logger.exception(f"[{merchant_name}]处理图片 {img_url} 时出错: {e}")
+            continue
+        ocr_processed_count += 1  # 更新总计数
+
+    if ocr_processed_count > 0:
+        logger.info(
+            f"[{merchant_name}]成功处理图片 {len(article_info.articleImages)}张， 并存储了 {ocr_processed_count} 条 OCR 记录。")
 
 
 def process_article(article_url: str):
     """处理单篇文章：提取、OCR、存储"""
     logger.info(f"--- 开始处理文章: {article_url} ---")
+    merchant_name = ""
     try:
         # 1. 获取 HTML
         response = retry_session.get(article_url, headers=REQUEST_HEADERS, timeout=30)
@@ -118,23 +169,20 @@ def process_article(article_url: str):
 
         # 3. 使用 LLM 从文本提取机场/套餐信息
         llm_extracted_data = extract_info_llm(article_info.articleText)
-        provider_name = None
-        website_url = None
         if llm_extracted_data:
-            provider_name = llm_extracted_data.get("provider_name")
+            provider_name = article_info.articleTitle.split("---")[-1].strip() or llm_extracted_data.get(
+                "provider_name")
+            merchant_name = provider_name
             website_url = llm_extracted_data.get("provider_website")
-            # package_info = llm_extracted_data.get("package_info") # 可以存到 merchant 表或其他表
-            # mentioned_nodes_text = llm_extracted_data.get("mentioned_nodes") # LLM 提取的节点信息
             logger.info(f"LLM 提取结果: Provider={provider_name}, Website={website_url}")
         else:
             logger.warning(f"未能从文章 {article_url} 的文本中通过 LLM 提取结构化信息。")
-            # 备选策略：可以尝试从文章标题猜测机场名
-            # provider_name = article_info.articleTitle.split('---')[-1].strip() # 非常不准确
+            return None
 
         # 如果无法确定机场名称，后续处理可能意义不大，可以选择跳过
         if not provider_name:
             logger.warning(f"无法确定文章 {article_url} 对应的机场名称，跳过 OCR 和存储。")
-            return
+            return None
 
         # 4. 获取或创建机场商家记录
         merchant = sr_merchant_dao.find_or_create_merchant(
@@ -150,117 +198,20 @@ def process_article(article_url: str):
         logger.info(f"获取或创建商家记录: {merchant.name} (ID: {merchant_id})")
 
         # 5. 处理图片：下载 -> OCR -> 存储记录
-        ocr_processed_count = 0
         for image_url in article_info.articleImages:
-            image_bytes = download_image(image_url, retry_session)
-            if not image_bytes:
+            # 提取节点信息并创建记录
+            try:
+                extract_and_save_node_and_record(image_url, merchant_id, merchant_name, article_info)
+            except Exception as e:
+                logger.exception(f"!!!![{merchant_name}]处理图片 {image_url} 时出错: {e}")
                 continue
-            save_image(image_bytes, image_url)
-            # 调用 OCR
-            ocr_results, extracted_test_time = process_image_ocr(image_bytes)
-
-            # 如果没有提取到表格记录，则跳过后续处理
-            if not ocr_results:
-                logger.warning(f"未能从图片 {image_url} (来源: {article_url}) 解析出 OCR 表格数据。")
-                continue  # 跳到下一张图片
-
-            # 确定有效的测试时间：优先使用图片中提取的，其次用文章发布时间
-            effective_test_time = extracted_test_time or article_info.articleDateTime
-            if extracted_test_time:
-                logger.info(f"使用图片内提取的测试时间: {effective_test_time}")
-            else:
-                logger.info(f"图片内未找到测试时间，使用文章发布时间: {effective_test_time}")
-
-            ocr_processed_count_for_image = 0  # 单张图片处理计数
-
-            # 解析 OCR 结果并存入数据库
-            for ocr_record in ocr_results:
-                # -- 从 OCR 结果中提取关键字段 --
-                # !! 列名需要与你的 OCR_EXPECTED_COLUMNS 和实际返回匹配 !!
-                node_name_raw = ocr_record.get("节点名称")
-                avg_speed_str = ocr_record.get("平均速度")
-                max_speed_str = ocr_record.get("最高速度")
-                tls_rtt_str = ocr_record.get("TLS RTT")
-                https_delay_str = ocr_record.get("HTTPS 延迟")
-                # 将其他所有列信息合并为一个 JSON 字符串，作为 unlock_info
-                # 排除已单独提取的列和空值的列
-                excluded_keys = {"节点名称", "平均速度", "最高速度", "TLS RTT", "HTTPS延迟", "序号", ""}  # 排除的列名
-                other_info = {k: v for k, v in ocr_record.items() if k not in excluded_keys and v}
-                unlock_info = json.dumps(other_info, ensure_ascii=False) if other_info else None
-
-                if not node_name_raw:
-                    logger.warning(f"OCR 记录缺少节点名称，跳过: {ocr_record}")
-                    continue
-
-                # 清理和转换数据
-                node_name = node_name_raw.strip()
-
-                # -- 需要健壮的数值转换，处理单位 (Mbps, Kbps, ms) --
-                def parse_speed(speed_str):
-                    if not speed_str: return None
-                    try:
-                        # 简单处理：去除单位，转换为 float (假设单位是 Mbps)
-                        return float(str(speed_str).lower().replace('mbps', '').replace('kbps', '').replace(' ', ''))
-                    except ValueError:
-                        return None
-
-                def parse_latency(latency_str):
-                    if not latency_str: return None
-                    try:
-                        # 简单处理：去除 ms
-                        return float(str(latency_str).lower().replace('ms', '').replace(' ', ''))
-                    except ValueError:
-                        return None
-
-                avg_speed = parse_speed(avg_speed_str)
-                max_speed = parse_speed(max_speed_str)
-                tls_rtt = parse_latency(tls_rtt_str)
-                https_delay = parse_latency(https_delay_str)
-
-                # -- 处理测试时间 (已在上面确定 effective_test_time) --
-                test_time = effective_test_time
-
-            # -- 获取或创建节点记录 --
-            # 简单的基于名称查找/创建。更复杂的可能需要结合 LLM 提取的区域信息
-            node = sr_node_dao.find_or_create_node(node_name=node_name)  # 需要在 sr_node_dao 添加此函数
-            if not node or not node.node_id:
-                logger.error(f"无法为节点 '{node_name}' (来自机场 '{provider_name}') 创建或找到数据库记录。")
-                continue
-            node_id = node.node_id
-
-            # -- 创建测速记录对象 --
-            speed_test_record = SSRSpeedTestRecord(
-                # UniqueID=None, # 由数据库生成
-                airport_id=merchant_id,
-                airport_name=provider_name,
-                node_id=node_id,
-                node_name=node_name,
-                average_speed=avg_speed,
-                max_speed=max_speed,
-                tls_rtt=tls_rtt,
-                https_delay=https_delay,
-                unlock_info=unlock_info,
-                test_time=test_time,  # 使用文章发布时间或 OCR 时间
-                # insert_time=None, # 由数据库 DEFAULT
-                # update_time=None, # 由数据库更新
-                host_info=None  # 可以记录测试环境信息
-            )
-
-            # -- 插入数据库 --
-            created = ssr_speed_test_record_dao.create_record(speed_test_record)
-            if created:
-                ocr_processed_count_for_image += 1
-                ocr_processed_count += 1  # 更新总计数
-
-        if ocr_processed_count > 0:
-            logger.info(f"成功处理图片 {image_url} 并存储了 {ocr_processed_count} 条 OCR 记录。")
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"处理文章 {article_url} 时发生网络错误: {e}", exc_info=True)
+        logger.exception(f"[{merchant_name}]处理文章 {article_url} 时发生网络错误: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"处理文章 {article_url} 时发生未知错误: {e}", exc_info=True)
+        logger.exception(f"[{merchant_name}]处理文章 {article_url} 时发生未知错误: {e}", exc_info=True)
     finally:
-        logger.info(f"--- 完成处理文章: {article_url} ---")
+        logger.info(f"--- 完成处理文章: [{merchant_name}]{article_url} ---")
 
 
 def main():
@@ -287,10 +238,8 @@ def main():
     for i, url in enumerate(article_urls_to_process):
         logger.info(f"处理进度: {i + 1}/{len(article_urls_to_process)}")
         process_article(url)
-        # 可以加个延时避免请求过于频繁
-        time.sleep(1)
 
-    # 4. (可选) 处理完成后计算得分
+    # 4.处理完成后计算得分
     logger.info("所有文章处理完毕，开始计算得分...")
     final_scores = calculate_all_scores()
     print("\n" + "=" * 20 + " 最终得分排名 " + "=" * 20)
@@ -317,37 +266,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # --- 添加 sr_node_dao.find_or_create_node 的实现 ---
-    # 这个函数很重要，需要在 db/sr_node_dao.py 中添加
-    def find_or_create_node(node_name: str, node_type: str | None = None, region: str | None = None) -> SRNode | None:
-        conn = create_connection()
-        cursor = conn.cursor()
-        try:
-            # 尝试查找
-            cursor.execute("SELECT * FROM sr_node WHERE node_name = ?", (node_name,))
-            row = cursor.fetchone()
-            if row:
-                logger.debug(f"找到已存在的节点: {node_name} (ID: {row['id']})")
-                # 将 sqlite3.Row 转换为 SRNode 对象
-                # 注意：数据库列名为 id，模型字段名为 node_id
-                return SRNode(node_id=row['id'], node_name=row['node_name'], type=row['type'], region=row['region'])
-            else:
-                # 创建
-                logger.info(f"未找到节点 '{node_name}', 准备创建新记录...")
-                cursor.execute('''
-                    INSERT INTO sr_node (node_name, type, region, gmt_modified)
-                    VALUES (?, ?, ?, ?)
-                 ''', (node_name, node_type, region, datetime.now()))
-                conn.commit()
-                new_id = cursor.lastrowid
-                logger.info(f"成功创建节点: {node_name} (ID: {new_id})")
-                return SRNode(node_id=new_id, node_name=node_name, type=node_type, region=region)
-        finally:
-            close_connection(conn)
-
-
-    # 将函数添加到 sr_node_dao 模块 (运行时动态添加，或者直接修改文件)
-    sr_node_dao.find_or_create_node = find_or_create_node
-    # ----------------------------------------------------
-
     main()
