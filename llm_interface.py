@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from db.sr_merchant_speed_test_pic_dao import query_pic_record_by_md5, create_pic_record
 from models.SRMerchantSpeedTestPic import SRMerchantSpeedTestPic
-from sr_utils import validate_data
+from sr_utils import filter_valid_records
 
 logger = logging.getLogger(__name__)
 # 从 config 导入所有需要的配置
@@ -23,8 +23,6 @@ from config import (
     LLM_EXTRACTION_PROMPT,
     LLM_IMAGE_EXTRACTION_PROMPT  # Import Image Prompt
 )
-
-logger = logging.getLogger(__name__)
 
 # Flag to track configuration status
 IS_LLM_CONFIGURED = False
@@ -146,18 +144,19 @@ def extract_info_from_image(img_info: dict, merchant_id: int) -> Dict[str, Any] 
     record_from_db = query_pic_record_by_md5(img_info.get("md5"))
     if record_from_db:
         img_info["pic_id"] = record_from_db.id
+        # return ast.literal_eval(str(record_from_db.model_return))
         return json.loads(str(record_from_db.model_return).replace("'", "\""))
     # 2. 调用 LLM
     llm_result = extract_info_from_image_llm(img_info)
     if not llm_result:
         raise ValueError("LLM 未返回数据。")
-    if not validate_data(llm_result):
-        raise ValueError(f"数据不符合。{llm_result}")
+    filter_valid_records(llm_result)
     # 3. 创建记录
+    dumps = json.dumps(llm_result)
     record = create_pic_record(
         SRMerchantSpeedTestPic(merchant_id=merchant_id, pic_md5=img_info.get("md5"), pic_path=img_info.get("path"),
                                pic_url=img_info.get("url"), test_time=llm_result.get("test_time"),
-                               model_return=json.dumps(llm_result)))
+                               model_return=dumps))
     img_info["pic_id"] = record.id
     return llm_result
 
@@ -189,28 +188,34 @@ def extract_info_from_image_llm(img_info: dict) -> Dict[str, Any] | None:
             }
         ]
         # 2. 调用多模态模型
-        response = dashscope.MultiModalConversation.call(
+        responses = dashscope.MultiModalConversation.call(
             api_key=DASHSCOPE_API_KEY,
             model=BAILIAN_VL_MODEL_ID,
             messages=prompt_,
             vl_high_resolution_images=True,
+            stream=True,
+            incremental_output=True,
             result_format='message',
             response_format={'type': 'json_object'},
-            timeout=1200
+            timeout=1800
         )
-        if not response.output:
+
+        full_content = ""
+        for response in responses:
+            if not response["output"]["choices"][0]["message"].content:
+                continue
+            full_content += response["output"]["choices"][0]["message"].content[0]["text"]
+        if not full_content:
             logger.error(
-                f"DashScope API 调用失败: Code={response.code}, Message={response.message}  耗时：{datetime.now() - start_time}")
+                f"DashScope API 调用失败: Code={responses.code}, Message={responses.message}  耗时：{datetime.now() - start_time}")
             return None
-        text_ = response.output.choices[0].message.content[0]["text"]
-        logger.info(
-            f"Token用量情况：输入总Token：{response.usage["input_tokens"]}，输入图像Token：{response.usage["image_tokens"]} 耗时：{datetime.now() - start_time}")
+        # logger.info(f"Token用量情况：输入总Token：{responses.usage["input_tokens"]}，输入图像Token：{responses.usage["image_tokens"]} 耗时：{datetime.now() - start_time}")
         try:
-            extracted_data = json.loads(text_)
+            extracted_data = json.loads(full_content)
             logger.info("LLM 提取信息并成功解析 JSON。")
             return extracted_data
         except json.JSONDecodeError as e:
-            logger.error(f"JSON解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{text_}'", exc_info=True)
+            logger.error(f"JSON解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{full_content}'", exc_info=True)
             return None
     except Exception as e:
         # 处理 SDK、Base64 编码或网络等其他异常

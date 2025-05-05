@@ -107,4 +107,12 @@ test_record_list列表中的每个对象代表表格中的一行数据，每个�
 
 # --- OCR 相关配置 ---
 # 根据你的 OCR 模型和需求调整
-REQUIRED_KEYS = ["节点名称", "平均速度", "最大速度", "TLSRTT", "HTTPS延迟"] # 示例列名
+REQUIRED_KEYS = ["节点名称", "平均速度", "最高速度", "TLSRTT", "HTTPS延迟"] # 示例列名
+
+# 定义权重
+weights = {
+    'avg_speed': 0.3,
+    'max_speed': 0.1,
+    'tls_rtt': 0.2,
+    'https_latency': 0.4
+}

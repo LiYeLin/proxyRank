@@ -1,14 +1,17 @@
 # main.py
 import logging
+import sqlite3
 from datetime import datetime
 from typing import List
 from urllib.parse import urljoin, urlparse
 
+import pandas as pd
 import requests  # 导入 requests 以便捕获其异常
 from bs4 import BeautifulSoup  # 需要导入以获取列表页信息
 
+import config
 from config import (
-    TARGET_BLOG_BASE_URL, ARTICLE_LIST_URL, REQUEST_HEADERS, LOG_FILE  # 如果需要保存图片，则需要此配置
+    TARGET_BLOG_BASE_URL, ARTICLE_LIST_URL, REQUEST_HEADERS, LOG_FILE, DATABASE_NAME  # 如果需要保存图片，则需要此配置
 )
 from content_extractor import extract_content_bs
 from converter import ocr_convert_to_record
@@ -17,7 +20,7 @@ from db.db_connection import create_tables
 from image_downloader import download_image, save_image  # 仅下载 bytes
 from llm_interface import extract_info_llm, extract_info_from_image
 from models import articleInfo
-from scoring import calculate_all_scores
+from score_gemini import evaluate_merchants
 from utils.RetrySession import RetrySession
 from utils.logger_config import setup_logging
 
@@ -123,7 +126,7 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
     for ocr_record in speed_test_record_list:
         try:
             # 3.1 数据处理
-            convert_dict = ocr_convert_to_record(ocr_record, merchant_id, test_time, merchant_name,pic_info)
+            convert_dict = ocr_convert_to_record(ocr_record, merchant_id, test_time, merchant_name, pic_info)
             sr_node = convert_dict[0]
             # 转换成SSRSpeedTestRecord类型
             sr_record = convert_dict[1]
@@ -238,28 +241,18 @@ def main():
     for i, url in enumerate(article_urls_to_process):
         logger.info(f"处理进度: {i + 1}/{len(article_urls_to_process)}")
         process_article(url)
+    # 创建内存数据库并执行 SQL
+    conn = sqlite3.connect(DATABASE_NAME)
 
-    # 4.处理完成后计算得分
-    logger.info("所有文章处理完毕，开始计算得分...")
-    final_scores = calculate_all_scores()
-    print("\n" + "=" * 20 + " 最终得分排名 " + "=" * 20)
-    if final_scores:
-        # 格式化输出得分
-        for merchant, nodes in final_scores.items():
-            avg_m_score = sum(nodes.values()) / len(nodes) if nodes else 0
-            print(f"\n{merchant} (平均分: {avg_m_score:.2f})")
-            # 只显示前 N 个节点或全部显示
-            node_count = 0
-            for node, score in nodes.items():
-                print(f"  - {node}: {score:.2f}")
-                node_count += 1
-                # if node_count >= 10: # 示例：最多显示10个
-                #     print("  ...")
-                #     break
-    else:
-        print("未能计算任何得分。")
-    print("=" * 50)
+    # 使用 Pandas 从内存数据库加载数据
+    merchants_df = pd.read_sql_query("SELECT id, name FROM sr_merchant", conn)
+    merchants_df.rename(columns={'id': 'merchant_id'}, inplace=True)
 
+    speed_tests_df = pd.read_sql_query("SELECT * FROM sr_speed_test_record", conn)
+    conn.close()  # 关闭数据库连接
+    print("--- 原始测速记录 (部分) ---")
+    print(speed_tests_df.head())
+    evaluate_merchants(speed_tests_df, merchants_df, config.weights)
     end_time = datetime.now()
     logger.info(f"====== SR Scraper 运行结束 ======")
     logger.info(f"总耗时: {end_time - start_time}")
