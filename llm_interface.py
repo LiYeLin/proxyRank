@@ -216,7 +216,7 @@ def extract_info_from_image_llm(img_info: dict) -> Dict[str, Any] | None:
             return extracted_data
         except json.JSONDecodeError as e:
             logger.error(f"JSON解析 LLM 返回的 JSON 时出错: {e}. 原始文本: '{full_content}'", exc_info=True)
-            return None
+            raise ValueError("LLM 返回数据json解析失败。")
     except Exception as e:
         # 处理 SDK、Base64 编码或网络等其他异常
         logger.exception(f"调用 DashScope 多模态 API 时发生未知错误: {e}", exc_info=True)

@@ -119,6 +119,7 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
     if not speed_test_record_result:
         logger.warning(f"[{merchant_name}]未能从图片 {img_url} 解析出 OCR 表格数据。")
         raise ValueError("未能从图片提取表格数据。")
+    logger.info(f"[{merchant_name}]从图片 {img_url} 解析出 OCR 表格数据。{speed_test_record_result}")
     speed_test_record_list = speed_test_record_result.get("test_record_list", [])
     test_time = speed_test_record_result.get("test_time") or article_info.articleDateTime
 
@@ -138,6 +139,11 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
                     f"[{merchant_name}]无法为节点 '{sr_node}' (来自机场 '{merchant_name}') 创建或找到数据库记录。")
                 continue
             sr_record.node_id = node.node_id
+            record = ssr_speed_test_record_dao.query_record_by_mid_nid_pid(merchant_id, node.node_id, pic_info.get("pic_id"))
+            if record:
+                logger.info(
+                    f"[{merchant_name}]已存在相同商户、节点和图片的测速记录，pass。")
+                continue
             # 3.3-- 插入测速记录
             ssr_speed_test_record_dao.create_record(sr_record)
         except Exception as e:

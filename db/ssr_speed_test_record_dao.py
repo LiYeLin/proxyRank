@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 # 注意：SSRSpeedTestRecord 模型中的字段名与数据库表列名不完全一致
 # 例如 UniqueID vs id, airport_id vs merchant_id, airport_name vs merchant_name
 # DAO 函数在插入和查询时需要做映射
+def query_record_by_mid_nid_pid(merchant_id: int, node_id: int, pic_id: int):
+    conn = create_connection()
+    cursor = conn.cursor()
+    sql = '''
+        SELECT * FROM sr_speed_test_record WHERE merchant_id = ? AND node_id = ? AND pic_id = ?
+    '''
+    cursor.execute(sql, (merchant_id, node_id, pic_id))
+    conn.commit()
+    return cursor.fetchall()
 
 def create_record(record: SSRSpeedTestRecord) -> SSRSpeedTestRecord | None:
     """创建新的测速记录"""
