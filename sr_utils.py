@@ -95,7 +95,7 @@ def filter_valid_records(llm_result: dict) -> dict:
     # 检查 test_record_list 本身是否存在且是列表
     # 使用 .get() 更安全，避免在外层直接访问不存在的键时报错
     test_records = llm_result.get("test_record_list")
-
+    llm_result["test_time"] = str(llm_result.get("test_time")).replace(" (CST)","")
     # 如果键缺失、值不是列表、或者列表为空，则没有记录需要验证，直接返回空列表
     if not isinstance(test_records, list) or not test_records:
          # 区分是键缺失还是列表为空进行更详细的日志

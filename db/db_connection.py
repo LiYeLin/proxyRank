@@ -81,7 +81,9 @@ def create_tables():
                         tls_rtt REAL,
                         https_delay REAL,
                         test_time DATETIME,
-                        host_info TEXT
+                        host_info TEXT,
+                        	UNIQUE("merchant_id","node_id","pic_id","test_time")
+
                     )
                 ''')
 

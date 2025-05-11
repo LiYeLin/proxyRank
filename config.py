@@ -116,3 +116,6 @@ weights = {
     'tls_rtt': 0.2,
     'https_latency': 0.4
 }
+
+
+stream_switch = True

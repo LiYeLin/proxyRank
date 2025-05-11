@@ -100,15 +100,17 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
     """
     处理图片并保存节点和测速记录。
     """
-    ocr_processed_count = 0
+    processed_cnt = 0
     # 1. 下载图片
     image_bytes = download_image(image_url, retry_session)
     if not image_bytes:
         raise ValueError("无法下载图片。")
     pic_info = save_image(image_bytes=image_bytes, merchant_name=merchant_name, original_url=image_url)
     img_url = pic_info.get("url")
+    logger.info(f"1. 图片下载成功{image_url}")
     # 2. 从图片中提取表格数据
     try:
+        logger.info(f"2. 从图片 {image_url} 中提取表格数据。")
         speed_test_record_result = extract_info_from_image(pic_info, merchant_id)
     except ValueError as e:
         logger.error(f"[{merchant_name}]从图片 {img_url} 解析出 OCR 表格数据时出错: 数据问题{e}")
@@ -119,7 +121,7 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
     if not speed_test_record_result:
         logger.warning(f"[{merchant_name}]未能从图片 {img_url} 解析出 OCR 表格数据。")
         raise ValueError("未能从图片提取表格数据。")
-    logger.info(f"[{merchant_name}]从图片 {img_url} 解析出 OCR 表格数据。{speed_test_record_result}")
+    logger.info(f"2.从[{merchant_name}]图片 {img_url} 解析出ocr数据{len(speed_test_record_result)}条")
     speed_test_record_list = speed_test_record_result.get("test_record_list", [])
     test_time = speed_test_record_result.get("test_time") or article_info.articleDateTime
 
@@ -139,26 +141,23 @@ def extract_and_save_node_and_record(image_url: str, merchant_id: int, merchant_
                     f"[{merchant_name}]无法为节点 '{sr_node}' (来自机场 '{merchant_name}') 创建或找到数据库记录。")
                 continue
             sr_record.node_id = node.node_id
-            record = ssr_speed_test_record_dao.query_record_by_mid_nid_pid(merchant_id, node.node_id, pic_info.get("pic_id"))
+            record = ssr_speed_test_record_dao.query_record_by_mid_nid_pid(merchant_id, node.node_id,
+                                                                           pic_info.get("pic_id"))
             if record:
-                logger.info(
-                    f"[{merchant_name}]已存在相同商户、节点和图片的测速记录，pass。")
+                logger.info(f"[{merchant_name}]已存在相同测速记录，pass。")
                 continue
             # 3.3-- 插入测速记录
             ssr_speed_test_record_dao.create_record(sr_record)
+            processed_cnt += 1
         except Exception as e:
             logger.exception(f"[{merchant_name}]处理图片 {img_url} 时出错: {e}")
             continue
-        ocr_processed_count += 1  # 更新总计数
-
-    if ocr_processed_count > 0:
-        logger.info(
-            f"[{merchant_name}]成功处理图片 {len(article_info.articleImages)}张， 并存储了 {ocr_processed_count} 条 OCR 记录。")
+        logger.info(f"3. [{merchant_name}]成功处理图片 {len(article_info.articleImages)}张，共存储{processed_cnt} 记录。")
 
 
 def process_article(article_url: str):
     """处理单篇文章：提取、OCR、存储"""
-    logger.info(f"--- 开始处理文章: {article_url} ---")
+    logger.info(f"---[处理文章][begin]: {article_url} ---")
     merchant_name = ""
     try:
         # 1. 获取 HTML
@@ -174,8 +173,10 @@ def process_article(article_url: str):
 
         logger.info(f"文章标题: {article_info.articleTitle}")
         logger.info(f"发布时间: {article_info.articleDateTime}")
-        logger.info(f"找到图片数量: {len(article_info.articleImages)}")
+        images = article_info.articleImages
+        logger.info(f"找到图片数量: {len(images)}")
 
+        logger.info(f"开始提取机场信息")
         # 3. 使用 LLM 从文本提取机场/套餐信息
         llm_extracted_data = extract_info_llm(article_info.articleText)
         if llm_extracted_data:
@@ -183,7 +184,7 @@ def process_article(article_url: str):
                 "provider_name")
             merchant_name = provider_name
             website_url = llm_extracted_data.get("provider_website")
-            logger.info(f"LLM 提取结果: Provider={provider_name}, Website={website_url}")
+            logger.info(f"机场信息提取结束  提取结果: Provider={provider_name}, Website={website_url}")
         else:
             logger.warning(f"未能从文章 {article_url} 的文本中通过 LLM 提取结构化信息。")
             return None
@@ -204,23 +205,26 @@ def process_article(article_url: str):
             logger.error(f"无法为机场 '{provider_name}' 创建或找到数据库记录。")
             return
         merchant_id = merchant.id
-        logger.info(f"获取或创建商家记录: {merchant.name} (ID: {merchant_id})")
+        logger.info(f"创建商家记录成功: {merchant.name} (ID: {merchant_id})")
 
         # 5. 处理图片：下载 -> OCR -> 存储记录
-        for image_url in article_info.articleImages:
+        for i, image_url in enumerate(images):
             # 提取节点信息并创建记录
             try:
+                logger.info(f"[extract_and_save_record][begin]处理第 {i}/{len(images)} 张图片: {image_url}")
                 extract_and_save_node_and_record(image_url, merchant_id, merchant_name, article_info)
+                logger.info(f"[extract_and_save_record][end]第 {i}/{len(images)} 张图片提取保存完成")
+                logger.info("=========================")
             except Exception as e:
-                logger.exception(f"!!!![{merchant_name}]处理图片 {image_url} 时出错: {e}")
+                logger.exception(f"!!!![{merchant_name}]处理图片 {image_url} 时出错,已经跳过: {e}")
                 continue
-
     except requests.exceptions.RequestException as e:
         logger.exception(f"[{merchant_name}]处理文章 {article_url} 时发生网络错误: {e}", exc_info=True)
     except Exception as e:
         logger.exception(f"[{merchant_name}]处理文章 {article_url} 时发生未知错误: {e}", exc_info=True)
     finally:
-        logger.info(f"--- 完成处理文章: [{merchant_name}]{article_url} ---")
+        logger.info(f"---[处理文章][end]: [{merchant_name}]完成 ---")
+        logger.info("===========================================================================")
 
 
 def main():
@@ -229,12 +233,12 @@ def main():
     start_time = datetime.now()
 
     # 1. 初始化数据库表
-    logger.info("初始化数据库...")
+    logger.info("[prePost]初始化数据库...")
     create_tables()
 
     # 2. 获取需要爬取的文章 URL 列表
     # 可以从单个页面获取，也可以爬取多个分页，或从 RSS/Sitemap 获取
-    logger.info("获取文章 URL 列表...")
+    logger.info("[prePost]获取文章 URL 列表...")
     article_urls_to_process = get_article_urls_from_all_page(ARTICLE_LIST_URL)
 
     if not article_urls_to_process:

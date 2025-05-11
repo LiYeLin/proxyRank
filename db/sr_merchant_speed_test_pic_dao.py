@@ -31,7 +31,7 @@ model_return
         cursor.execute(sql, params)
         conn.commit()
         record_id = cursor.lastrowid  # 获取自增主键
-        logger.info(f"成功创建图片记录 (ID: {record_id}) for {record.pic_url} - {record.pic_url}")
+        logger.info(f"成功写入图片结构化数据 (ID: {record_id}) for {record.pic_url} - {record.pic_url}")
         # 如果模型有 id 字段:
         record.id = record_id
         return record  # 或者根据 ID 重新查询一次以获取完整信息包括 gmt_create
