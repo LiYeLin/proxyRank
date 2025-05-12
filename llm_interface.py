@@ -149,20 +149,6 @@ def extract_info_from_image(img_info: dict, merchant_id: int) -> Dict[str, Any] 
         return json.loads(str(record_from_db.model_return).replace("'", "\""))
     # 2. 调用 LLM
     llm_result = extract_info_from_image_llm(img_info)
-    # llm_result = extract_structured_data_from_image_with_bailian_ocr(img_info.get("path"),{
-    #             "test_time": "",
-    #             "test_record_list": [
-    #                 {
-    #                     "序号": "",
-    #                     "节点名称": "",
-    #                     "类型": "",
-    #                     "平均速度": "",
-    #                     "最高速度": "",
-    #                     "TLSRTT": "",
-    #                     "HTTPS延迟": ""
-    #                 }
-    #             ]
-    #         })
     if not llm_result:
         raise ValueError("LLM 未返回数据。")
     filter_valid_records(llm_result)
