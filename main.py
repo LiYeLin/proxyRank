@@ -249,7 +249,7 @@ def main():
 
     # 3. 遍历并处理每篇文章
     for i, url in enumerate(article_urls_to_process):
-        logger.info(f"处理进度: {i + 1}/{len(article_urls_to_process)}")
+        logger.info(f"====商家处理进度: {i + 1}/{len(article_urls_to_process)}====")
         process_article(url)
     # 创建内存数据库并执行 SQL
     conn = sqlite3.connect(DATABASE_NAME)

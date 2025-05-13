@@ -215,7 +215,9 @@ def extract_info_from_image_llm(img_info: dict) -> Dict[str, Any] | None:
                 f"DashScope API 调用失败: Code={responses.code}, Message={responses.message}  耗时：{datetime.now() - start_time}")
             return None
         logger.info(f"Token用量情况：输入总Token：{response.get("usage").get('input_tokens')},"
+                    f"输入花费：{response.get("usage").get('input_tokens') / 1000 * 0.0012}"
                     f"输出总Token：{response.get("usage").get('output_tokens')} "
+                    f"输出花费{response.get("usage").get('output_tokens') / 1000 * 0.0036}"
                     f"耗时：{datetime.now() - start_time}")
         try:
             extracted_data = json.loads(full_content)
